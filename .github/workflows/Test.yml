@@ -18,6 +18,7 @@ permissions:
 jobs:
   debug-manifest:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
@@ -25,7 +26,7 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '21'
 
       - name: Set up Python
@@ -41,11 +42,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p splits
+
           if [ -n "${{ inputs.release_tag }}" ]; then
-            gh release download "${{ inputs.release_tag }}" --repo "${{ inputs.source_repo }}" --dir splits --pattern "*.apk"
+            gh release download "${{ inputs.release_tag }}" \
+              --repo "${{ inputs.source_repo }}" \
+              --dir splits \
+              --pattern "*.apk"
           else
-            gh release download --repo "${{ inputs.source_repo }}" --dir splits --pattern "*.apk"
+            gh release download \
+              --repo "${{ inputs.source_repo }}" \
+              --dir splits \
+              --pattern "*.apk"
           fi
+
           ls -la splits
 
       - name: Download APKEditor (latest)
@@ -55,13 +64,28 @@ jobs:
           wget -q "$ASSET_URL" -O APKEditor.jar
 
       - name: Merge split APKs
-        run: java -jar APKEditor.jar m -i splits -o merged.apk
+        run: |
+          java -jar APKEditor.jar m \
+            -i splits \
+            -o merged.apk
 
       - name: Download Apktool 2.12.1
-        run: wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar -O apktool.jar
+        run: |
+          wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar \
+            -O apktool.jar
 
       - name: Decode merged APK
-        run: java -jar apktool.jar d merged.apk -o decoded -f
+        run: |
+          java -jar apktool.jar d merged.apk -o decoded -f
+
+      - name: Recompile decoded APK
+        run: |
+          java -jar apktool.jar b decoded -o recompiled.apk
+
+      - name: Verify recompiled APK
+        run: |
+          echo "Recompiled APK created successfully:"
+          ls -lh recompiled.apk
 
       - name: Detect providers missing android:name
         run: |
@@ -80,8 +104,10 @@ jobs:
           for provider in root.iter("provider"):
               if provider.get(NS + "name"):
                   continue
+
               count += 1
               line = provider.sourceline
+
               out_lines.append(f"--- Offending <provider> #{count} at line {line} ---")
               out_lines.append(etree.tostring(provider, pretty_print=True).decode())
               out_lines.append("")
@@ -96,14 +122,19 @@ jobs:
           PYEOF
 
       - name: Show output
-        run: cat manifest_provider_issues.txt
+        run: |
+          cat manifest_provider_issues.txt
 
       - name: Commit and push result
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           mkdir -p debug-output
           cp manifest_provider_issues.txt debug-output/manifest_provider_issues.txt
+
           git add debug-output/manifest_provider_issues.txt
+
           git commit -m "Add manifest provider debug output [skip ci]" || echo "Nothing to commit"
+
           git push
