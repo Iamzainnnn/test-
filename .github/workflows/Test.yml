@@ -81,7 +81,7 @@ jobs:
         run: |
           java -jar apktool.jar d merged.apk -o decoded -f
 
-            - name: Remove offending provider
+      - name: Remove offending provider
         run: |
           python3 <<'PYEOF'
           from lxml import etree
