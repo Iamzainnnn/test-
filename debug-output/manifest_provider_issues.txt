@@ -1,0 +1,4 @@
+--- Offending <provider> #1 at line 2512 ---
+<provider xmlns:android="http://schemas.android.com/apk/res/android" xmlns:amazon="http://schemas.amazon.com/apk/res/android" android:authorities="com.facebook.pages.app.ig4work.tokenhandoff"/>
+        
+
