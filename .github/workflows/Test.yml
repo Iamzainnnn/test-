@@ -1,4 +1,4 @@
-name: Extract Original AndroidManifest
+name: Dump Binary AndroidManifest (AAPT2)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ on:
         default: ""
 
 jobs:
-  extract-manifest:
+  dump-manifest:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,7 +21,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir apks
+          mkdir -p apks
 
           if [ -n "${{ inputs.release_tag }}" ]; then
             gh release download "${{ inputs.release_tag }}" \
@@ -35,21 +35,32 @@ jobs:
               --pattern "base.apk"
           fi
 
+          echo "Downloaded APK:"
           ls -lah apks
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Print original AndroidManifest
+      - name: Install Build Tools
         run: |
-          apkanalyzer manifest print apks/base.apk > AndroidManifest.xml
+          yes | sdkmanager "build-tools;36.0.0"
 
-      - name: Show provider
+      - name: Locate aapt2
         run: |
-          grep -n -A10 -B10 "tokenhandoff" AndroidManifest.xml || true
+          AAPT2=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt2 | head -n1)
+          echo "AAPT2=$AAPT2" >> $GITHUB_ENV
+          echo "Using: $AAPT2"
 
-      - name: Upload Manifest
+      - name: Dump Binary AndroidManifest
+        run: |
+          "$AAPT2" dump xmltree apks/base.apk AndroidManifest.xml > manifest_xmltree.txt
+
+      - name: Show tokenhandoff section
+        run: |
+          grep -n -A20 -B20 "tokenhandoff" manifest_xmltree.txt || true
+
+      - name: Upload xmltree
         uses: actions/upload-artifact@v4
         with:
-          name: original-manifest
-          path: AndroidManifest.xml
+          name: manifest-xmltree
+          path: manifest_xmltree.txt
