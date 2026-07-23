@@ -1,4 +1,4 @@
-name: Dump Binary AndroidManifest (AAPT2)
+name: Dump Binary AndroidManifest (AAPT1)
 
 on:
   workflow_dispatch:
@@ -38,26 +38,39 @@ jobs:
           echo "Downloaded APK:"
           ls -lah apks
 
-      - name: Set up Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Build Tools
+      - name: Install Android Build Tools
         run: |
-          yes | sdkmanager "build-tools;36.0.0"
+          yes | sdkmanager "build-tools;34.0.0"
 
-      - name: Locate aapt2
+      - name: Locate aapt
         run: |
-          AAPT2=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt2 | head -n1)
-          echo "AAPT2=$AAPT2" >> $GITHUB_ENV
-          echo "Using: $AAPT2"
+          AAPT=$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name aapt | head -n1)
 
-      - name: Dump Binary AndroidManifest
-        run: |
-          "$AAPT2" dump xmltree apks/base.apk AndroidManifest.xml > manifest_xmltree.txt
+          if [ -z "$AAPT" ]; then
+            echo "aapt not found!"
+            find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2
+            exit 1
+          fi
 
-      - name: Show tokenhandoff section
+          echo "Using aapt:"
+          echo "$AAPT"
+
+          echo "AAPT=$AAPT" >> $GITHUB_ENV
+
+      - name: Dump AndroidManifest.xml
         run: |
-          grep -n -A20 -B20 "tokenhandoff" manifest_xmltree.txt || true
+          "$AAPT" dump xmltree apks/base.apk AndroidManifest.xml > manifest_xmltree.txt
+
+      - name: Search tokenhandoff
+        run: |
+          grep -n -A30 -B30 "tokenhandoff" manifest_xmltree.txt || true
+
+      - name: Print first 300 lines
+        run: |
+          head -300 manifest_xmltree.txt
 
       - name: Upload xmltree
         uses: actions/upload-artifact@v4
