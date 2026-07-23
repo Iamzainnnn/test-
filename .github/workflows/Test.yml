@@ -1,42 +1,22 @@
-name: Base APK Manifest Debug
+name: Extract Original AndroidManifest
 
 on:
   workflow_dispatch:
     inputs:
       source_repo:
-        description: 'owner/repo containing the GitHub Release'
+        description: "owner/repo containing the GitHub Release"
         required: true
-        default: 'instafel/source-apks'
+        default: "instafel/source-apks"
       release_tag:
-        description: 'Release tag (leave empty for latest)'
+        description: "Release tag (leave blank for latest)"
         required: false
-        default: ''
-
-permissions:
-  contents: write
+        default: ""
 
 jobs:
-  debug-base:
+  extract-manifest:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: Install lxml
-        run: pip install lxml --quiet
-
       - name: Download base.apk
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -57,79 +37,19 @@ jobs:
 
           ls -lah apks
 
-      - name: Download Apktool 2.12.1
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Print original AndroidManifest
         run: |
-          wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar \
-            -O apktool.jar
+          apkanalyzer manifest print apks/base.apk > AndroidManifest.xml
 
-      - name: Decode base.apk
+      - name: Show provider
         run: |
-          java -jar apktool.jar d apks/base.apk -o decoded -f
+          grep -n -A10 -B10 "tokenhandoff" AndroidManifest.xml || true
 
-      - name: Show provider context
-        run: |
-          echo "Searching for tokenhandoff provider..."
-          grep -n -A5 -B5 "com.facebook.pages.app.ig4work.tokenhandoff" decoded/AndroidManifest.xml || true
-
-      - name: Recompile (Force AAPT1)
-        run: |
-          java -jar apktool.jar b decoded \
-            --use-aapt1 \
-            -o rebuilt.apk
-
-      - name: Verify rebuilt APK
-        run: |
-          ls -lh rebuilt.apk
-
-      - name: Detect providers missing android:name
-        run: |
-          python3 <<'PYEOF'
-          from lxml import etree
-
-          NS = "{http://schemas.android.com/apk/res/android}"
-
-          tree = etree.parse("decoded/AndroidManifest.xml")
-          root = tree.getroot()
-
-          count = 0
-          report = []
-
-          for provider in root.iter("provider"):
-              if provider.get(NS + "name"):
-                  continue
-
-              count += 1
-
-              report.append("=" * 80)
-              report.append(f"Provider #{count}")
-              report.append(f"Line: {provider.sourceline}")
-              report.append(f"Authorities: {provider.get(NS + 'authorities')}")
-              report.append(
-                  etree.tostring(
-                      provider,
-                      pretty_print=True,
-                      encoding="unicode"
-                  )
-              )
-
-          if count == 0:
-              report.append("No providers missing android:name found.")
-
-          with open("manifest_provider_issues.txt", "w", encoding="utf-8") as f:
-              f.write("\n\n".join(report))
-
-          print(f"Found {count} offending provider(s).")
-          PYEOF
-
-      - name: Print report
-        run: |
-          echo "========== REPORT =========="
-          cat manifest_provider_issues.txt
-
-      - name: Upload artifacts
+      - name: Upload Manifest
         uses: actions/upload-artifact@v4
         with:
-          name: base-apk-debug
-          path: |
-            decoded/AndroidManifest.xml
-            manifest_provider_issues.txt
+          name: original-manifest
+          path: AndroidManifest.xml
