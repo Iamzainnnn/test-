@@ -55,7 +55,8 @@ jobs:
               --pattern "*.apk"
           fi
 
-          ls -la splits
+          echo "Downloaded split APKs:"
+          ls -lah splits
 
       - name: Download APKEditor (latest)
         run: |
@@ -71,20 +72,23 @@ jobs:
 
       - name: Download Apktool 2.12.1
         run: |
-          wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar \
+          wget -q \
+            https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar \
             -O apktool.jar
 
       - name: Decode merged APK
         run: |
           java -jar apktool.jar d merged.apk -o decoded -f
 
-      - name: Recompile decoded APK
+      - name: Recompile decoded APK (Force AAPT1)
         run: |
-          java -jar apktool.jar b decoded -o recompiled.apk
+          java -jar apktool.jar b decoded \
+            --use-aapt1 \
+            -o recompiled.apk
 
       - name: Verify recompiled APK
         run: |
-          echo "Recompiled APK created successfully:"
+          echo "Recompiled APK:"
           ls -lh recompiled.apk
 
       - name: Detect providers missing android:name
@@ -93,12 +97,12 @@ jobs:
           from lxml import etree
 
           NS = "{http://schemas.android.com/apk/res/android}"
-          path = "decoded/AndroidManifest.xml"
+          MANIFEST = "decoded/AndroidManifest.xml"
 
-          tree = etree.parse(path)
+          tree = etree.parse(MANIFEST)
           root = tree.getroot()
 
-          out_lines = []
+          out = []
           count = 0
 
           for provider in root.iter("provider"):
@@ -106,32 +110,43 @@ jobs:
                   continue
 
               count += 1
-              line = provider.sourceline
 
-              out_lines.append(f"--- Offending <provider> #{count} at line {line} ---")
-              out_lines.append(etree.tostring(provider, pretty_print=True).decode())
-              out_lines.append("")
+              out.append("=" * 80)
+              out.append(f"Provider #{count}")
+              out.append(f"Line: {provider.sourceline}")
+              out.append("=" * 80)
+              out.append(
+                  etree.tostring(
+                      provider,
+                      pretty_print=True,
+                      encoding="unicode"
+                  )
+              )
+              out.append("")
 
           if count == 0:
-              out_lines.append("No <provider> tags missing android:name found.")
+              out.append("No <provider> tags missing android:name found.")
 
-          with open("manifest_provider_issues.txt", "w") as f:
-              f.write("\n".join(out_lines))
+          with open("manifest_provider_issues.txt", "w", encoding="utf-8") as f:
+              f.write("\n".join(out))
 
           print(f"Found {count} offending provider tag(s).")
           PYEOF
 
-      - name: Show output
+      - name: Show report
         run: |
+          echo "================ Manifest Provider Report ================"
           cat manifest_provider_issues.txt
 
-      - name: Commit and push result
+      - name: Save report
+        run: |
+          mkdir -p debug-output
+          cp manifest_provider_issues.txt debug-output/
+
+      - name: Commit and push report
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          mkdir -p debug-output
-          cp manifest_provider_issues.txt debug-output/manifest_provider_issues.txt
 
           git add debug-output/manifest_provider_issues.txt
 
