@@ -1,14 +1,14 @@
-name: Manifest Provider Debug
+name: Base APK Manifest Debug
 
 on:
   workflow_dispatch:
     inputs:
       source_repo:
-        description: 'owner/repo holding the split APKs (as a GitHub release)'
+        description: 'owner/repo containing the GitHub Release'
         required: true
         default: 'instafel/source-apks'
       release_tag:
-        description: 'Release tag to pull from (leave empty for latest)'
+        description: 'Release tag (leave empty for latest)'
         required: false
         default: ''
 
@@ -16,80 +16,70 @@ permissions:
   contents: write
 
 jobs:
-  debug-manifest:
+  debug-base:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout this repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: "21"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: "3.x"
 
       - name: Install lxml
         run: pip install lxml --quiet
 
-      - name: Download split APKs from source repo
+      - name: Download base.apk
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p splits
+          mkdir apks
 
           if [ -n "${{ inputs.release_tag }}" ]; then
             gh release download "${{ inputs.release_tag }}" \
               --repo "${{ inputs.source_repo }}" \
-              --dir splits \
-              --pattern "*.apk"
+              --dir apks \
+              --pattern "base.apk"
           else
             gh release download \
               --repo "${{ inputs.source_repo }}" \
-              --dir splits \
-              --pattern "*.apk"
+              --dir apks \
+              --pattern "base.apk"
           fi
 
-          echo "Downloaded split APKs:"
-          ls -lah splits
-
-      - name: Download APKEditor (latest)
-        run: |
-          API_URL="https://api.github.com/repos/REAndroid/APKEditor/releases/latest"
-          ASSET_URL=$(curl -s "$API_URL" | grep "browser_download_url.*\.jar" | cut -d '"' -f4)
-          wget -q "$ASSET_URL" -O APKEditor.jar
-
-      - name: Merge split APKs
-        run: |
-          java -jar APKEditor.jar m \
-            -i splits \
-            -o merged.apk
+          ls -lah apks
 
       - name: Download Apktool 2.12.1
         run: |
-          wget -q \
-            https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar \
+          wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar \
             -O apktool.jar
 
-      - name: Decode merged APK
+      - name: Decode base.apk
         run: |
-          java -jar apktool.jar d merged.apk -o decoded -f
+          java -jar apktool.jar d apks/base.apk -o decoded -f
 
-      - name: Recompile decoded APK (Force AAPT1)
+      - name: Show provider context
+        run: |
+          echo "Searching for tokenhandoff provider..."
+          grep -n -A5 -B5 "com.facebook.pages.app.ig4work.tokenhandoff" decoded/AndroidManifest.xml || true
+
+      - name: Recompile (Force AAPT1)
         run: |
           java -jar apktool.jar b decoded \
             --use-aapt1 \
-            -o recompiled.apk
+            -o rebuilt.apk
 
-      - name: Verify recompiled APK
+      - name: Verify rebuilt APK
         run: |
-          echo "Recompiled APK:"
-          ls -lh recompiled.apk
+          ls -lh rebuilt.apk
 
       - name: Detect providers missing android:name
         run: |
@@ -97,13 +87,12 @@ jobs:
           from lxml import etree
 
           NS = "{http://schemas.android.com/apk/res/android}"
-          MANIFEST = "decoded/AndroidManifest.xml"
 
-          tree = etree.parse(MANIFEST)
+          tree = etree.parse("decoded/AndroidManifest.xml")
           root = tree.getroot()
 
-          out = []
           count = 0
+          report = []
 
           for provider in root.iter("provider"):
               if provider.get(NS + "name"):
@@ -111,45 +100,36 @@ jobs:
 
               count += 1
 
-              out.append("=" * 80)
-              out.append(f"Provider #{count}")
-              out.append(f"Line: {provider.sourceline}")
-              out.append("=" * 80)
-              out.append(
+              report.append("=" * 80)
+              report.append(f"Provider #{count}")
+              report.append(f"Line: {provider.sourceline}")
+              report.append(f"Authorities: {provider.get(NS + 'authorities')}")
+              report.append(
                   etree.tostring(
                       provider,
                       pretty_print=True,
                       encoding="unicode"
                   )
               )
-              out.append("")
 
           if count == 0:
-              out.append("No <provider> tags missing android:name found.")
+              report.append("No providers missing android:name found.")
 
           with open("manifest_provider_issues.txt", "w", encoding="utf-8") as f:
-              f.write("\n".join(out))
+              f.write("\n\n".join(report))
 
-          print(f"Found {count} offending provider tag(s).")
+          print(f"Found {count} offending provider(s).")
           PYEOF
 
-      - name: Show report
+      - name: Print report
         run: |
-          echo "================ Manifest Provider Report ================"
+          echo "========== REPORT =========="
           cat manifest_provider_issues.txt
 
-      - name: Save report
-        run: |
-          mkdir -p debug-output
-          cp manifest_provider_issues.txt debug-output/
-
-      - name: Commit and push report
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add debug-output/manifest_provider_issues.txt
-
-          git commit -m "Add manifest provider debug output [skip ci]" || echo "Nothing to commit"
-
-          git push
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: base-apk-debug
+          path: |
+            decoded/AndroidManifest.xml
+            manifest_provider_issues.txt
