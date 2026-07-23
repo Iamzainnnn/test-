@@ -1,10 +1,10 @@
-name: Dump Binary AndroidManifest (AAPT1)
+name: Manifest Provider Removal Test
 
 on:
   workflow_dispatch:
     inputs:
       source_repo:
-        description: "owner/repo containing the GitHub Release"
+        description: "owner/repo holding the split APKs"
         required: true
         default: "instafel/source-apks"
       release_tag:
@@ -12,68 +12,136 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: write
+
 jobs:
-  dump-manifest:
+  test-build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download base.apk
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install lxml
+        run: |
+          pip install lxml --quiet
+
+      - name: Download split APKs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p apks
+          mkdir -p splits
 
           if [ -n "${{ inputs.release_tag }}" ]; then
             gh release download "${{ inputs.release_tag }}" \
               --repo "${{ inputs.source_repo }}" \
-              --dir apks \
-              --pattern "base.apk"
+              --dir splits \
+              --pattern "*.apk"
           else
             gh release download \
               --repo "${{ inputs.source_repo }}" \
-              --dir apks \
-              --pattern "base.apk"
+              --dir splits \
+              --pattern "*.apk"
           fi
 
-          echo "Downloaded APK:"
-          ls -lah apks
+          echo "Downloaded APKs:"
+          ls -lah splits
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android Build Tools
+      - name: Download APKEditor
         run: |
-          yes | sdkmanager "build-tools;34.0.0"
+          API_URL="https://api.github.com/repos/REAndroid/APKEditor/releases/latest"
+          ASSET_URL=$(curl -s "$API_URL" | grep "browser_download_url.*\.jar" | cut -d '"' -f4)
+          wget -q "$ASSET_URL" -O APKEditor.jar
 
-      - name: Locate aapt
+      - name: Merge split APKs
         run: |
-          AAPT=$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name aapt | head -n1)
+          java -jar APKEditor.jar m \
+            -i splits \
+            -o merged.apk
 
-          if [ -z "$AAPT" ]; then
-            echo "aapt not found!"
-            find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2
+      - name: Download Apktool 2.12.1
+        run: |
+          wget -q \
+          https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar \
+          -O apktool.jar
+
+      - name: Decode merged APK
+        run: |
+          java -jar apktool.jar d merged.apk -o decoded -f
+
+      - name: Remove offending provider
+        run: |
+          python3 <<'PYEOF'
+          from lxml import etree
+
+          NS = "{http://schemas.android.com/apk/res/android}"
+          AUTHORITY = "com.facebook.pages.app.ig4work.tokenhandoff"
+
+          tree = etree.parse("decoded/AndroidManifest.xml")
+          root = tree.getroot()
+          app = root.find("application")
+
+          removed = 0
+
+          for provider in list(app.findall("provider")):
+              if provider.get(NS + "authorities") == AUTHORITY:
+                  app.remove(provider)
+                  removed += 1
+
+          tree.write(
+              "decoded/AndroidManifest.xml",
+              encoding="utf-8",
+              xml_declaration=True,
+              pretty_print=True
+          )
+
+          print(f"Removed {removed} provider(s).")
+
+          if removed == 0:
+              raise RuntimeError("Provider not found!")
+          PYEOF
+
+      - name: Verify removal
+        run: |
+          if grep -q "com.facebook.pages.app.ig4work.tokenhandoff" decoded/AndroidManifest.xml; then
+            echo "Provider still exists!"
             exit 1
           fi
 
-          echo "Using aapt:"
-          echo "$AAPT"
+          echo "Provider removed successfully."
 
-          echo "AAPT=$AAPT" >> $GITHUB_ENV
-
-      - name: Dump AndroidManifest.xml
+      - name: Recompile (Force AAPT1)
         run: |
-          "$AAPT" dump xmltree apks/base.apk AndroidManifest.xml > manifest_xmltree.txt
+          java -jar apktool.jar b decoded \
+            --use-aapt1 \
+            -o rebuilt.apk
 
-      - name: Search tokenhandoff
+      - name: Delete previous release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          grep -n -A30 -B30 "tokenhandoff" manifest_xmltree.txt || true
+          gh release delete provider-removal-test -y || true
+          git push origin :refs/tags/provider-removal-test || true
 
-      - name: Print first 300 lines
-        run: |
-          head -300 manifest_xmltree.txt
-
-      - name: Upload xmltree
-        uses: actions/upload-artifact@v4
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: manifest-xmltree
-          path: manifest_xmltree.txt
+          tag_name: provider-removal-test
+          name: Provider Removal Test
+          body: |
+            Rebuilt APK after removing:
+            com.facebook.pages.app.ig4work.tokenhandoff
+          files: rebuilt.apk
+          generate_release_notes: false
