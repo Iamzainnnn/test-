@@ -81,7 +81,7 @@ jobs:
         run: |
           java -jar apktool.jar d merged.apk -o decoded -f
 
-      - name: Remove offending provider
+            - name: Remove offending provider
         run: |
           python3 <<'PYEOF'
           from lxml import etree
@@ -91,13 +91,12 @@ jobs:
 
           tree = etree.parse("decoded/AndroidManifest.xml")
           root = tree.getroot()
-          app = root.find("application")
 
           removed = 0
 
-          for provider in list(app.findall("provider")):
+          for provider in root.xpath("//*[local-name()='provider']"):
               if provider.get(NS + "authorities") == AUTHORITY:
-                  app.remove(provider)
+                  provider.getparent().remove(provider)
                   removed += 1
 
           tree.write(
@@ -110,6 +109,9 @@ jobs:
           print(f"Removed {removed} provider(s).")
 
           if removed == 0:
+              print("===== Providers found =====")
+              for provider in root.xpath("//*[local-name()='provider']"):
+                  print(provider.get(NS + "authorities"))
               raise RuntimeError("Provider not found!")
           PYEOF
 
