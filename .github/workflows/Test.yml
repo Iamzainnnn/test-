@@ -74,7 +74,7 @@ jobs:
       - name: Download Apktool 2.12.1
         run: |
           wget -q \
-          https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar \
+          https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar \
           -O apktool.jar
 
       - name: Decode merged APK
