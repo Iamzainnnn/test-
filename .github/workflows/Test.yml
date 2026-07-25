@@ -81,53 +81,10 @@ jobs:
         run: |
           java -jar apktool.jar d merged.apk -o decoded -f
 
-      - name: Remove offending provider
-        run: |
-          python3 <<'PYEOF'
-          from lxml import etree
-
-          NS = "{http://schemas.android.com/apk/res/android}"
-          AUTHORITY = "com.facebook.pages.app.ig4work.tokenhandoff"
-
-          tree = etree.parse("decoded/AndroidManifest.xml")
-          root = tree.getroot()
-
-          removed = 0
-
-          for provider in root.xpath("//*[local-name()='provider']"):
-              if provider.get(NS + "authorities") == AUTHORITY:
-                  provider.getparent().remove(provider)
-                  removed += 1
-
-          tree.write(
-              "decoded/AndroidManifest.xml",
-              encoding="utf-8",
-              xml_declaration=True,
-              pretty_print=True
-          )
-
-          print(f"Removed {removed} provider(s).")
-
-          if removed == 0:
-              print("===== Providers found =====")
-              for provider in root.xpath("//*[local-name()='provider']"):
-                  print(provider.get(NS + "authorities"))
-              raise RuntimeError("Provider not found!")
-          PYEOF
-
-      - name: Verify removal
-        run: |
-          if grep -q "com.facebook.pages.app.ig4work.tokenhandoff" decoded/AndroidManifest.xml; then
-            echo "Provider still exists!"
-            exit 1
-          fi
-
-          echo "Provider removed successfully."
-
+      
       - name: Recompile (Force AAPT1)
         run: |
           java -jar apktool.jar b decoded \
-            --use-aapt1 \
             -o rebuilt.apk
 
       - name: Delete previous release
