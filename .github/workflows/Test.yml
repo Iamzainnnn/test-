@@ -71,7 +71,7 @@ jobs:
             -i splits \
             -o merged.apk
 
-      - name: Download Apktool 2.12.1
+      - name: Download Apktool 3.0.3
         run: |
           wget -q \
           https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar \
@@ -97,7 +97,10 @@ jobs:
           gh release delete provider-removal-test -y || true
           git push origin :refs/tags/provider-removal-test || true
 
-      - name: Publish Release
+      # ---------------------------------
+      # CREATE RELEASE
+      # ---------------------------------
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: provider-removal-test
@@ -105,5 +108,53 @@ jobs:
           body: |
             Rebuilt APK after removing:
             com.facebook.pages.app.ig4work.tokenhandoff
-          files: rebuilt.apk
           generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ---------------------------------
+      # WAIT FOR RELEASE
+      # ---------------------------------
+      - name: Wait for GitHub Release
+        shell: bash
+        run: |
+          echo "⏳ Waiting for GitHub release to become available..."
+          sleep 10
+
+      # ---------------------------------
+      # UPLOAD APK
+      # ---------------------------------
+      - name: Upload rebuilt APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          echo "⬆️ Uploading rebuilt.apk..."
+
+          success=false
+
+          for attempt in 1 2 3 4 5; do
+            echo "🔄 Upload attempt ${attempt}/5..."
+
+            if gh release upload \
+              provider-removal-test \
+              rebuilt.apk \
+              --clobber; then
+
+              echo "✅ rebuilt.apk uploaded successfully."
+              success=true
+              break
+            fi
+
+            echo "⚠️ Upload failed. Waiting 10 seconds before retry..."
+            sleep 10
+          done
+
+          if [ "$success" != true ]; then
+            echo "❌ Failed to upload rebuilt.apk after 5 attempts."
+            exit 1
+          fi
+
+          echo "🎉 Provider Removal Test release published successfully."
