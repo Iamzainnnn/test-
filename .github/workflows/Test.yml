@@ -85,6 +85,10 @@ jobs:
         run: |
           java test.java decoded
 
+      - name: Run Test Patch
+        run: |
+          java ads.java decoded
+
       - name: Recompile (Force AAPT1)
         run: |
           java -jar apktool.jar b decoded \
